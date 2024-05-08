@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 import matplotlib.image as img
 from sklearn.metrics import mean_squared_error
 import math
+from collections import defaultdict
+from collections import Counter
+import statistics
 
 
 if __name__ == '__main__':
@@ -54,17 +57,17 @@ else:
             samples = []
             start_points = []
             if mineral_type == 1:
-                start_points.extend([(305, 90), (100, 110)])
+                start_points.extend([(305, 90)])# (100, 110)])
                 adjacent_pixels = 1
                 if pixel_radius == None:
                     pixel_radius = np.random.randint(1, 20)
             elif mineral_type == 2:
-                start_points.extend([(349, 48), (310, 55)])  # montmorillonite
+                start_points.extend([(290, 48)])# (310, 55)])  # montmorillonite
                 adjacent_pixels = 1
                 if pixel_radius == None:
                     pixel_radius = np.random.randint(1, 20)
             else:
-                start_points.extend([(290, 290), (25, 150)])  # kaolinite
+                start_points.extend([(290, 290)])# (25, 150)])  # kaolinite
                 adjacent_pixels = 1
                 if pixel_radius == None:
                     pixel_radius = np.random.randint(1, 20)
@@ -74,25 +77,28 @@ else:
                 # Randomly select a pixel within the region
                 random_offset_row = np.random.randint(-adjacent_pixels, adjacent_pixels + 1)
                 random_offset_col = np.random.randint(-adjacent_pixels, adjacent_pixels + 1)
-                random_row = max(0, min(n_rows - 1, start_row + random_offset_row))
-                random_col = max(0, min(n_cols - 1, start_col + random_offset_col))
+                random_row = max(0, min(n_rows, start_row + random_offset_row))
+                random_col = max(0, min(n_cols, start_col + random_offset_col))
                 print(random_row,random_col)
 
+                
                 # Generate a grid of samples around the randomly selected pixel
                 for i in range(-pixel_radius, pixel_radius + 1):
                     for j in range(-pixel_radius, pixel_radius + 1):
                         row = max(0, min(n_rows - 1, random_row + i))
                         col = max(0, min(n_cols - 1, random_col + j))
                         samples.append((row, col))
-                    
             return samples
+        
               
         def selectedindex_fit(self, mineral_type=None, pixel_samples=None, pixel_radius=None):
             if pixel_samples is None:
                 pixel_samples = self.generate_pixel_samples(mineral_type=mineral_type, pixel_radius=pixel_radius)
-                print(f"Grid size: {math.sqrt(len(pixel_samples)/2)} * {math.sqrt(len(pixel_samples)/2)}")
+                print(f'Number of samples = (1+2r)^2 :{len(pixel_samples)}')                
                 print(f"Samples: {pixel_samples}")
-
+            
+            self.mineral_data = defaultdict(list)
+            
             for pixel_sample in pixel_samples:
                 # Fit the spectral library to each pixel sample
                 y_index = pixel_sample
@@ -105,39 +111,60 @@ else:
                 self.model_coefficients, _ = nnls(self.X, self.y)
 
                 self.non_zero_indices = np.where(self.model_coefficients != 0)[0]
-                self.non_zero_coefficients = self.model_coefficients[self.non_zero_indices]
+                self.non_zero_coefficients = np.round(self.model_coefficients[self.non_zero_indices],2)
                 self.non_zero_spectral_names = [self.spectra_names[index] for index in self.non_zero_indices]
 
                 y_infer = np.dot(self.X[:, self.model_coefficients != 0], self.non_zero_coefficients)
                 self.rmse = np.sqrt(mean_squared_error(self.y, y_infer))
 
-                #self.plot_spectra()
-                #self.final_summary()
+                
+                self.mineral_data[f'{pixel_sample}'] = list(zip(self.non_zero_spectral_names, self.non_zero_coefficients))
+
+            self.final_summary()
             
             return self
-               
-        def plot_spectra(self):
-            plt.figure(figsize=(12, 7))
-            plt.plot(self.wavelengths, self.y, label="Observed Spectrum",color="black")
-            plt.plot(self.wavelengths, np.dot(self.model_coefficients, self.X.T), label="Estimated Spectrum",color="red")
-            
-            for index, name in zip(self.non_zero_indices, self.non_zero_spectral_names):
-                plt.plot(self.wavelengths, self.spectral_library.T[:, index], label=f"{name}", linestyle='dotted')
-            plt.xlabel('Wavelength')
-            plt.ylabel('Reflectance/Radiance')
-            plt.title(f"{self.technique} \n RMSE: {self.rmse}")
-            plt.legend()
-            plt.show()  
 
-        def final_summary(self):
-            summary = [(name, coefficient) for name, coefficient in zip(self.non_zero_spectral_names, self.non_zero_coefficients)]
-            summary = sorted(summary, key=lambda x: x[1], reverse=True)
+        def final_summary(self, top_n=None):
+            if top_n is None:
+                # Determine the number of top minerals based on the most common minerals in the model
+                counts = [len(abundances) for abundances in self.mineral_data.values()]
+                top_n = statistics.mode(counts)
 
-            print(f"Summary: {self.technique}")
-            for name, coefficient in summary:
-                print(f"{name}, Coefficient: {coefficient}")
+            # Count the occurrences of each mineral
+            mineral_counts = {}
+            for abundances in self.mineral_data.values():
+                for mineral_abundance in abundances:
+                    mineral_name = mineral_abundance[0]
+                    if mineral_name not in mineral_counts:
+                        mineral_counts[mineral_name] = 0
+                    mineral_counts[mineral_name] += 1
 
-            return summary
+            # Get the top n most common minerals
+            top_minerals = sorted(mineral_counts, key=mineral_counts.get, reverse=True)[:top_n]
+
+            mineral_abundances = {mineral: [] for mineral in top_minerals}
+
+            # Populate the dictionary with abundances for each mineral
+            for abundances in self.mineral_data.values():
+                for mineral_abundance in abundances:
+                    mineral_name, abundance = mineral_abundance
+                    if mineral_name in mineral_abundances:
+                        mineral_abundances[mineral_name].append(abundance)
+
+            # Initialize a dictionary to store the most common abundance for each top mineral
+            most_common_abundances = {}
+
+            # Iterate through the top minerals to find their most common abundance
+            for mineral, abundances in mineral_abundances.items():
+                most_common_abundance = max(set(abundances), key=abundances.count)
+                most_common_abundances[mineral] = most_common_abundance
+
+            # Print the top n most common minerals and their associated most common abundances
+            print(f"Top {top_n} most common minerals and their associated most common abundances:")
+            for mineral, abundance in most_common_abundances.items():
+                print(f"{mineral}: Most Common Abundance = {abundance:.2f}")
+
+            return self
 
         def show_paper_im(self):
             im = img.imread('cuperite_paper.png') 
