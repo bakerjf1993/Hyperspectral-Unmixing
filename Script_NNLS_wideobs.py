@@ -24,9 +24,9 @@ else:
             self.load_new_image(image_hdr_filename, image_filename)
             self.load_new_spectral_library(spectral_library_filename)
             self.reshape_image()
-            f, axarr = plt.subplots(1,2,figsize=(15, 15))
-            axarr[0].imshow(self.show_image())
-            axarr[1].imshow(self.show_paper_im())                        
+            #f, axarr = plt.subplots(1,2,figsize=(15, 15))
+            #axarr[0].imshow(self.show_image())
+            #axarr[1].imshow(self.show_paper_im())                        
 
         def load_new_image(self, image_hdr_filename, image_filename):
             if image_hdr_filename.endswith('.hdr'):
@@ -121,6 +121,9 @@ else:
                 self.mineral_data[f'{pixel_sample}'] = list(zip(self.non_zero_spectral_names, self.non_zero_coefficients))
 
             self.final_summary()
+            f, axarr = plt.subplots(1,2,figsize=(15, 15))
+            axarr[0].imshow(self.show_image(pixel_samples))
+            axarr[1].imshow(self.show_paper_im()) 
             
             return self
 
@@ -170,17 +173,22 @@ else:
             im = img.imread('cuperite_paper.png') 
             return im
 
-        def show_image(self,pix=[]):
-            
+        def show_image(self, pixel_samples=[]):
             plt.title("File_Image")
             skip = int(self.n_bands / 4)
-            imRGB = np.zeros((self.n_rows,self.n_cols,3))
+            imRGB = np.zeros((self.n_rows, self.n_cols, 3))
             for i in range(3):
-                imRGB[:,:,i] = self.stretch(self.image_arr[:,:,i * skip])
-            for loc in pix:
-                imRGB[loc[0],loc[1],0] = 1
-                imRGB[loc[0],loc[1],1] = 0
-                imRGB[loc[0],loc[1],2] = 0
+                imRGB[:, :, i] = self.stretch(self.image_arr[:, :, i * skip])
+            k=1
+            # Highlight each pixel sample in the grid
+            for loc in pixel_samples:
+                for i in range(-1, 2):
+                    for j in range(-1, 2):
+                        if 0 <= loc[0] + i < self.n_rows and 0 <= loc[1] + j < self.n_cols:
+                            imRGB[loc[0] + i, loc[1] + j, 0] = 0
+                            imRGB[loc[0] + i, loc[1] + j, 1] = 0
+                            imRGB[loc[0] + i, loc[1] + j, 2] = k*.1
+                        k=k+1    
             return imRGB
 
         def show_pca(self):
