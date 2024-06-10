@@ -3,10 +3,18 @@ import pandas as pd
 import spectral.io.envi as envi
 from itertools import combinations
 import matplotlib.pyplot as plt
+
 from statsmodels.regression.linear_model import OLS
 from itertools import chain
 from scipy.optimize import nnls
 from sklearn.metrics import mean_squared_error
+from collections import defaultdict
+from collections import Counter
+import statistics
+import random
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.image as img
+from sklearn.decomposition import PCA
 
 
 if __name__ == '__main__':
@@ -14,173 +22,159 @@ if __name__ == '__main__':
 else:
     
     class BMAquad:
-        def __init__(self, image_hdr_filename, image_filename, spectral_library_filename):
+        def __init__(self, image_hdr_filename, image_filename, pixel_location, spectral_library_filename):
             self.load_new_image(image_hdr_filename, image_filename)
+            self.load_pixel_location_info(pixel_location)
             self.load_new_spectral_library(spectral_library_filename)
-            self.reshape_image()
-            
+            self.load_chemical_data()
+            self.reshape_image()  
 
         def load_new_image(self, image_hdr_filename, image_filename):
-            if image_hdr_filename.endswith('.hdr'):
-                # Open the ENVI header and data files 
+            if image_hdr_filename.endswith('.hdr'): 
                 self.image = envi.open(image_hdr_filename, image_filename)
-
-                # Load image data 
                 self.image_arr = self.image.load()  
-
-                # Obtain and store dimensions of the hyperspectral image
                 self.n_rows, self.n_cols, self.n_imbands = self.image_arr.shape
-
-                #  Initialized or reset abundance maps attribute
                 self.abundance_maps = None
             else:
                 print("WARNING: library should be a .hdr file!")
 
         def load_new_spectral_library(self, spectral_library_filename):
             if spectral_library_filename.endswith('.hdr'):
-                # Open the ENVI header file
                 lib = envi.open(spectral_library_filename)
-
-                # Wavelength values extracted from the bands of the library
                 self.wavelengths = lib.bands.centers
-
-                # The number of bands (wavelengths) in the spectral library
                 self.n_bands = len(self.wavelengths)
-
-                # The number of spectra (materials) in the spectral library
                 self.n_spectra= len(lib.names)
-
-                # The actual spectral data (reflectance or radiance values)
                 self.spectral_library = lib.spectra
-
-                # The names of the spectra
-                self.spectra_names = lib.names  # Update spectra_names with material names
+                self.spectra_names = lib.names 
             else:
                 print("WARNING: library should be a .hdr file!")
+
+        def load_pixel_location_info(self, pixel_location):
+            if pixel_location.endswith('.csv'):
+                self.df = pd.read_csv(pixel_location)
+            else:
+                print("WARNING: pixel_location should be a .csv file! ")
+
+        def load_chemical_data(self):
+            self.chemicaldf = pd.read_csv("mineraldata2.csv", encoding='latin1')              
+        
+        def generate_pixel_samples(self, mineral_type=None):
+            self.ROI = []
+            samples = []
+
+            if mineral_type == 1:
+                self.ROI = random.choice(["alunite hill 1","alunite hill 2","alunite hill 3"])
+            elif mineral_type == 2:
+                self.ROI = random.choice(["montmorillonite hill 1","montmorillonite hill 2","montmorillonite hill 3","montmorillonite hill 4","montmorillonite hill 5"])
+            elif mineral_type == 3:  
+                self.ROI = random.choice(["kaolinite region 1","kaolinite region 2"])
+            else:
+                self.ROI = random.choice(["hydrated silica 1","hydrated silica 2","hydrated silica 3"])
+
+            samples = self.df[self.df['Name'] == self.ROI].iloc[:, [2, 3]].values.tolist()
+            print(self.ROI)            
+            return samples
         
         def reshape_image(self):
             # Convert the 3D hyperspectral image array into a 2D array
             reshaped_image = self.image_arr.reshape(self.n_rows * self.n_cols, self.n_bands)
             return reshaped_image
               
-        def selectedindex_fit(self, y_index=None, **kwargs):
+        def selectedindex_fit(self, mineral_type=None, **kwargs):
             self.technique = "BMA with Linear and Quadratic Terms"
-            if len(y_index) == 1:
-                if y_index[0] < 0 or y_index[0] >= self.n_rows * self.n_cols:
-                    raise ValueError("Invalid y_index. It should be between 0 and (n_rows * n_cols - 1).")
-                self.y = self.reshape_image()[y_index, :].reshape(1, -1).T
-            else:
-                self.y = self.image_arr[y_index[0], y_index[1], :].flatten()
+            pixel_samples = self.generate_pixel_samples(mineral_type=mineral_type)
+            
+            self.mineral_data = defaultdict(list)
+            self.pixel_y_data = {}
+            for pixel_sample in pixel_samples: 
+                y_index = tuple(pixel_sample)
+                self.y = self.df[(self.df.iloc[:, 2] == y_index[0]) & (self.df.iloc[:, 3] == y_index[1])].iloc[:, 4:].values.flatten()
+                self.pixel_y_data[y_index] = self.y
 
-            self.X = self.spectral_library.T
+                self.X = self.spectral_library.T
 
-            self.nRows, self.nCols = np.shape(self.X)
-            self.likelihoods = np.zeros(self.nCols)
-            self.coefficients = np.zeros(self.nCols)
-            self.likelihoods_quad = np.zeros((self.nCols,self.nCols))
-            self.coefficients_quad = np.zeros((self.nCols,self.nCols))
-            self.probabilities = np.zeros(self.nCols)
-            self.probabilities_quad = np.zeros((self.nCols,self.nCols))
+                self.nRows, self.nCols = np.shape(self.X)
+                self.likelihoods = np.zeros(self.nCols)
+                self.coefficients = np.zeros(self.nCols)
+                self.likelihoods_quad = np.zeros((self.nCols,self.nCols))
+                self.coefficients_quad = np.zeros((self.nCols,self.nCols))
+                self.probabilities = np.zeros(self.nCols)
+                self.probabilities_quad = np.zeros((self.nCols,self.nCols))
 
-            if 'MaxVars' in kwargs.keys():
-                self.MaxVars = kwargs['MaxVars']
-            else:
-                self.MaxVars = self.nCols
-
-            if 'Priors' in kwargs.keys():
-                if np.size(kwargs['Priors']) == self.nCols:
-                    self.Priors = kwargs['Priors']
+                if 'MaxVars' in kwargs.keys():
+                    self.MaxVars = kwargs['MaxVars']
                 else:
-                    print("WARNING: Provided priors error. Using equal priors instead.")
-                    print("The priors should be a numpy array of length equal to the number of regressor variables.")
+                    self.MaxVars = self.nCols
+
+                if 'Priors' in kwargs.keys():
+                    if np.size(kwargs['Priors']) == self.nCols:
+                        self.Priors = kwargs['Priors']
+                    else:
+                        print("WARNING: Provided priors error. Using equal priors instead.")
+                        print("The priors should be a numpy array of length equal to the number of regressor variables.")
+                        self.Priors = np.ones(self.nCols)
+                else:
                     self.Priors = np.ones(self.nCols)
-            else:
-                self.Priors = np.ones(self.nCols)
 
-            self.likelihood_sum = 0
-            self.max_likelihood = 0
-            self.num_elements = 1
-            self.best_model_index_set = None
-            candidate_models = list(range(self.nCols))
-            current_model_set = list(combinations(candidate_models, self.num_elements)) 
+                self.likelihood_sum = 0
+                self.max_likelihood = 0
+                self.num_elements = 1
+                self.best_model_index_set = None
+                candidate_models = list(range(self.nCols))
+                current_model_set = list(combinations(candidate_models, self.num_elements)) 
 
-            for self.num_elements in range(1, self.MaxVars + 1):
-                #print("iteration: ", self.num_elements)
-                self.model_index_set = None
-                iteration_max_likelihood = 0
-                self.model_index_list = []
-                self.model_likelihood = [] 
-                
-                for model_combination in current_model_set:
+                for self.num_elements in range(1, self.MaxVars + 1):
+                    #print("iteration: ", self.num_elements)
+                    self.model_index_set = None
+                    iteration_max_likelihood = 0
+                    self.model_index_list = []
+                    self.model_likelihood = [] 
                     
-                    model_X = self.X[:, list(model_combination)]
-                    model_combination_quad = []
-                    # incorporating the nonlinear terms
-                    for i1 in range(self.num_elements):
-                        for i2 in range(i1,self.num_elements):
-                            idx1 = model_combination[i1]
-                            idx2 = model_combination[i2]
-                            #print(f'Appending nonlinear term {idx1}x{idx2}')
-                            model_combination_quad.append([idx1,idx2])
-                            model_append = np.reshape(np.multiply(self.X[:,idx1],self.X[:,idx2]), (self.n_bands,1))
-                            model_X = np.hstack( (model_X, model_append))
-                    
-                    model_coefficients, _ = nnls(model_X, self.y)
-
-                    # rss = sum((y-f(x))^2)
-                    # MSE = 1/n * rss
-                    #https://en.wikipedia.org/wiki/Bayesian_information_criterion
-                    rss = np.sum((self.y - np.dot(model_X, model_coefficients)) ** 2)
-                    k = model_X.shape[1]  
-                    n = self.y.shape[0]
-                    bic = n * np.log(rss / n) + k * np.log(n)
-                    model_likelihood = np.exp(-bic / 2) * np.prod(self.Priors[list(model_combination)])
-                    
-                    if model_likelihood > iteration_max_likelihood:
-                        iteration_max_likelihood = model_likelihood
-                        self.model_index_set = model_combination
-                        self.model_combination_quad = model_combination_quad
-                        self.model_set_coefficients = model_coefficients
-                                     
-                    self.likelihood_sum += model_likelihood                  
-
-                    self.model_index_list.append(model_combination)
-                    self.model_likelihood.append(model_likelihood)
-                    for i, model_idx in enumerate(model_combination):
-                        self.likelihoods[model_idx] += model_likelihood
-                        self.coefficients[model_idx] += model_coefficients[i] * model_likelihood
-                    for i, model_idx in enumerate(model_combination_quad):
-                        self.likelihoods_quad[model_idx[0],model_idx[1]] += model_likelihood
-                        self.coefficients_quad[model_idx[0],model_idx[1]] += model_coefficients[self.num_elements + i] * model_likelihood
+                    for model_combination in current_model_set:
                         
-                self.model_probability = np.asarray(self.model_likelihood)/self.likelihood_sum
+                        model_X = self.X[:, list(model_combination)]
+                        model_combination_quad = []
+                        # incorporating the nonlinear terms
+                        for i1 in range(self.num_elements):
+                            for i2 in range(i1,self.num_elements):
+                                idx1 = model_combination[i1]
+                                idx2 = model_combination[i2]
+                                #print(f'Appending nonlinear term {idx1}x{idx2}')
+                                model_combination_quad.append([idx1,idx2])
+                                model_append = np.reshape(np.multiply(self.X[:,idx1],self.X[:,idx2]), (self.n_bands,1))
+                                model_X = np.hstack( (model_X, model_append))
+                        
+                        model_coefficients, _ = nnls(model_X, self.y)
+                        
+                        rss = np.sum((self.y - np.dot(model_X, model_coefficients)) ** 2)
+                        k = model_X.shape[1]  
+                        n = self.y.shape[0]
+                        bic = n * np.log(rss / n) + k * np.log(n)
+                        model_likelihood = np.exp(-bic / 2) * np.prod(self.Priors[list(model_combination)])
+                        
+                        if model_likelihood > iteration_max_likelihood:
+                            iteration_max_likelihood = model_likelihood
+                            self.model_index_set = model_combination
+                            self.model_combination_quad = model_combination_quad
+                            self.model_set_coefficients = model_coefficients
+                                        
+                        self.likelihood_sum += model_likelihood                  
 
-                if iteration_max_likelihood > self.max_likelihood:
-                    #############################
-                    # NOTE FROM BILL: I am commenting these out. The BMA method should only be based on the average model, not a best model.
-                    #############################
-                    #self.best_avg_model_y = np.dot(self.X, self.coefficients/self.likelihood_sum)
-                    #self.best_estimated_model_y = np.dot(self.X[:, list(self.model_index_set)], self.model_set_coefficients)                            
-                    self.max_likelihood = iteration_max_likelihood
-                    #self.best_model_index_name = [self.spectra_names[index] for index in self.model_index_set]
-                    #self.best_model_index_set = self.model_index_set
-                    #best_coefficients = model_coefficients
-                    #self.best_likelihood_sum = self.likelihood_sum
-                    #best_summary = self.summary()                                
+                        self.model_index_list.append(model_combination)
+                        self.model_likelihood.append(model_likelihood)
+                        for i, model_idx in enumerate(model_combination):
+                            self.likelihoods[model_idx] += model_likelihood
+                            self.coefficients[model_idx] += model_coefficients[i] * model_likelihood
+                        for i, model_idx in enumerate(model_combination_quad):
+                            self.likelihoods_quad[model_idx[0],model_idx[1]] += model_likelihood
+                            self.coefficients_quad[model_idx[0],model_idx[1]] += model_coefficients[self.num_elements + i] * model_likelihood
+                            
+                    self.model_probability = np.asarray(self.model_likelihood)/self.likelihood_sum
 
-                method1 = False
-                if method1 == True:
-                    top_models_threshold = round(0.05 * len(self.model_probability))
-               
-                    sorted_models = sorted(zip(self.model_index_list, self.model_probability), key=lambda x: x[1], reverse=True)
-                    candidate_models = []
-                    for i, (model_idx, model_prob) in enumerate(sorted_models):
-                            if i < top_models_threshold:
-                                for index in model_idx:
-                                    if index not in candidate_models:
-                                        candidate_models.append(index)
-                    current_model_set = list(combinations(candidate_models, self.num_elements + 1)) 
-                else:
+                    if iteration_max_likelihood > self.max_likelihood:                     
+                        self.max_likelihood = iteration_max_likelihood                 
+
+                    
                     top_models_threshold = round(0.05 * self.max_likelihood)
 
                     candidate_models = []
@@ -188,127 +182,188 @@ else:
                     for i, (model_idx, model_likelihood) in enumerate(zip(self.model_index_list, self.model_likelihood)):
                             if model_likelihood > top_models_threshold:
                                 for idx in range(self.nCols):
-                                    current_model_set.append(model_idx + (idx,) if model_idx else (idx,))
-                    #print(f"next_model_solution_space:{len(current_model_set)}")
+                                    current_model_set.append(model_idx + (idx,) if model_idx else (idx,))                               
                     
-                    if len(current_model_set) == 0:
+                    if top_models_threshold < self.num_elements + 1 or len(current_model_set) == 0:
                         print("The number of variables required to for the next iteration exceed the number of candidate models")
                         print(f"BMA is finishing early at iteration: {self.num_elements}")
-                        break                        
+                        break
+
+                self.probabilities = self.likelihoods / self.likelihood_sum
+                self.coefficients = self.coefficients / self.likelihood_sum   
+                self.probabilities_quad = self.likelihoods_quad / self.likelihood_sum
+                self.coefficients_quad = self.coefficients_quad / self.likelihood_sum   
                 
-                #self.summary()
-                #self.plot_spectra()                
+                # coefficients and probabilities, just for individual material spectra
+                self.probabilities_single_materials_only = self.probabilities/np.sum(self.probabilities)
+                self.coefficients_single_materials_only = self.coefficients/np.sum(self.probabilities)
+
+                # This is the average model that should be used from model averaging
+                #y_infer = np.dot(self.X, self.coefficients) #(This computation is fine for linear models)
+                self.y_infer = np.zeros(self.nRows)
+                for i in range(self.nCols):
+                    self.y_infer +=  self.X[:,i]*self.coefficients[i] # contribution from linear terms
+                    for j in range(self.nCols):
+                        self.y_infer +=  np.multiply(self.X[:,i],self.X[:,j])*self.coefficients_quad[i,j] # contribution from quadratic terms
+                        
                 
-                if top_models_threshold < self.num_elements + 1 or len(current_model_set) == 0:
-                    print("The number of variables required to for the next iteration exceed the number of candidate models")
-                    print(f"BMA is finishing early at iteration: {self.num_elements}")
-                    break
-
-            self.probabilities = self.likelihoods / self.likelihood_sum
-            self.coefficients = self.coefficients / self.likelihood_sum   
-            self.probabilities_quad = self.likelihoods_quad / self.likelihood_sum
-            self.coefficients_quad = self.coefficients_quad / self.likelihood_sum   
-            
-            # coefficients and probabilities, just for individual material spectra
-            self.probabilities_single_materials_only = self.probabilities/np.sum(self.probabilities)
-            self.coefficients_single_materials_only = self.coefficients/np.sum(self.probabilities)
-
-            # This is the average model that should be used from model averaging
-            #y_infer = np.dot(self.X, self.coefficients) #(This computation is fine for linear models)
-            self.y_infer = np.zeros(self.nRows)
-            for i in range(self.nCols):
-                self.y_infer +=  self.X[:,i]*self.coefficients[i] # contribution from linear terms
-                for j in range(self.nCols):
-                    self.y_infer +=  np.multiply(self.X[:,i],self.X[:,j])*self.coefficients_quad[i,j] # contribution from quadratic terms
-                    
-            
-            self.rmse = np.sqrt(mean_squared_error(self.y, self.y_infer))
-            
-            # select high probability spectra to plot with the model
-            # selecting spectra with a probbility greater than 0.01
-            self.model_index_set = []
-            self.model_index_name = []
-            spectra_indices_sorted_by_probablity = np.argsort(-self.probabilities_single_materials_only)
-            for i in spectra_indices_sorted_by_probablity:
-                if self.probabilities_single_materials_only[i] > 0.01:
-                    self.model_index_set.append(i)
-                    self.model_index_name.append(self.spectra_names[i]+', p='+str(self.probabilities_single_materials_only[i]))
-            
-
-            #print("BMA Best Model:", self.best_model_index_set,"|",self.max_likelihood)
-
-            #self.plot_spectra()
-            #self.final_summary()
+                self.rmse = np.sqrt(mean_squared_error(self.y, self.y_infer))
+                
+                # select high probability spectra to plot with the model
+                # selecting spectra with a probbility greater than 0.01
+                self.model_index_set = []
+                self.model_index_name = []
+                spectra_indices_sorted_by_probablity = np.argsort(-self.probabilities_single_materials_only)
+                for i in spectra_indices_sorted_by_probablity:
+                    if self.probabilities_single_materials_only[i] > 0.01:
+                        self.model_index_set.append(i)
+                        self.model_index_name.append(self.spectra_names[i]+', p='+str(self.probabilities_single_materials_only[i]))
+                         
+            self.final_summary()
+            self.plot_results()
 
             return self
-        def plot_spectra(self):
-                plt.figure(figsize=(20, 8))
-                plt.title(f"{self.technique}\nRMSE = {self.rmse} ")
-                avg_model_y = self.y_infer
-                #if self.model_index_set == self.best_model_index_set:
-                #    avg_model_y = self.best_avg_model_y
-                #    estimated_model_y = self.best_estimated_model_y
-                #else:
-                #    avg_model_y = np.dot(self.X, self.coefficients/self.likelihood_sum)
-                #    estimated_model_y = np.dot(self.X[:, list(self.model_index_set)], self.model_set_coefficients)
-                plt.plot(self.wavelengths,avg_model_y, label='Avg Model', color = "black",linewidth = 4, alpha = 0.2)
-                plt.plot(self.wavelengths, self.y.flatten(), label='Observed Spectrum', linestyle='dashed')
-                #plt.plot(self.wavelengths, estimated_model_y, label='Estimated Model', linestyle='dotted')
-                for idx,name in zip(self.model_index_set,self.model_index_name):
-                    plt.plot(self.wavelengths, self.spectral_library[idx], label=name)
-                plt.xlabel('Wavelength')
-                plt.ylabel('Reflectance/Radiance')
-                plt.legend()
-                plt.show()
-        
-        def summary(self,):
-            probabilities_temp = self.likelihoods / self.likelihood_sum
-            coefficients_temp = self.coefficients / self.likelihood_sum
-            
-            if self.model_index_set is not None:
-                best_model_spectral_names = [self.spectra_names[i] for i in self.model_index_set ] 
-                best_model_probabilities = [probabilities_temp[i] for i in self.model_index_set ]
-                best_model_coefficients = [coefficients_temp[i] for i in self.model_index_set ]
-
-                df = pd.DataFrame([best_model_spectral_names, best_model_probabilities, best_model_coefficients, self.model_set_coefficients], 
-                    ["Spectra", "Prob", "Avg.Coeff", "Best Model Coeff"]).T
-                '''with pd.option_context('display.max_rows', None,
-                       'display.max_columns', None,
-                       'display.precision', 3,
-                       ):
-                    print(df)'''
-            else:
-                print("No best model index set.")
-                
-            return df                   
         
         def final_summary(self):
-            df = pd.DataFrame([self.spectra_names, self.probabilities, self.coefficients], 
-                    ["Variable Name", "Probability", "Coefficient"]).T
-            df.sort_values("Probability",inplace=True, ascending = False)
-            print(f"Summary: {self.technique}")
-            #print(df.head(10))
-            with pd.option_context('display.max_rows', None,
-                       'display.max_columns', None,
-                       'display.precision', 3,
-                       ):
-                print(df)
+            pd.set_option('display.width', 1000)
+            most_common_abundances, most_common_probabilities = self.count_mineral()
+
+            indices = [self.spectra_names.index(mineral) for mineral in most_common_abundances.keys()]            
+            self.top_spectra = self.spectral_library.T[:, indices]
+            most_common_abundances_values = np.array(list(most_common_abundances.values()))
+            self.y_infer = np.dot(self.top_spectra, most_common_abundances_values)   
             
-        def final_summary_compare(self):
-            summary = [(name, coefficient) for name, coefficient in zip(self.spectra_names,self.coefficients)]
-            summary = sorted(summary, key=lambda x: x[1], reverse=True)
+            data = {'Name': [], 'Category': [], 'Formula': [], 'Probability': [], 'Abundance': []}
+            print(f"{self.technique}-Top {self.top_n} most common minerals and their associated most common abundances:")
+            for mineral, abundance in most_common_abundances.items():
+                mineral_row = self.chemicaldf[self.chemicaldf['Name']==mineral.split()[1]].iloc[0:1]
+                mineral_category = mineral_row.iloc[0]['Category']
+                mineral_formula = mineral_row.iloc[0]['Formula']
+                probability = most_common_probabilities[mineral]
 
-            '''print(f"Summary: {self.technique}")
-            for name, coefficient in summary:
-                print(f"{name}, Coefficient: {coefficient}")'''
-
-            return summary
+                data['Name'].append(mineral)
+                data['Category'].append(mineral_category)
+                data['Formula'].append(mineral_formula)
+                data['Probability'].append(probability)
+                data['Abundance'].append(abundance)
             
+            df = pd.DataFrame(data)
+            print(df)
+            return self
+        
+        def count_mineral(self):
+            counts = [len(abundances) for abundances in self.mineral_data.values()]
+            self.top_n = statistics.mode(counts)
 
-             
+            # Count the occurrences of each mineral
+            mineral_counts = {}
+            for abundances in self.mineral_data.values():
+                for mineral_abundance in abundances:
+                    mineral_name = mineral_abundance[0]
+                    if mineral_name not in mineral_counts:
+                        mineral_counts[mineral_name] = 0
+                    mineral_counts[mineral_name] += 1
 
+            # Get the top n most common minerals
+            top_minerals = sorted(mineral_counts, key=mineral_counts.get, reverse=True)[:self.top_n]            
+
+            # Populate the dictionary with abundances and probabilities for each mineral
+            mineral_abundances = {mineral: [] for mineral in top_minerals}
+            mineral_probabilities = {mineral: [] for mineral in top_minerals}
+            for abundances in self.mineral_data.values():
+                for mineral_abundance in abundances:
+                    mineral_name, probability, coefficient = mineral_abundance
+                    if mineral_name in mineral_abundances:
+                        mineral_abundances[mineral_name].append(coefficient)
+                        mineral_probabilities[mineral_name].append(probability)
+
+            # Initialize a dictionary to store the most common abundance and probability for each top mineral
+            most_common_abundances = {}
+            most_common_probabilities = {}
+            for mineral, abundances in mineral_abundances.items():
+                most_common_abundance = max(set(abundances), key=abundances.count)
+                most_common_abundances[mineral] = most_common_abundance
+
+            for mineral, probabilities in mineral_probabilities.items():
+                most_common_probability = max(set(probabilities), key=probabilities.count)
+                most_common_probabilities[mineral] = most_common_probability
+
+            return most_common_abundances, most_common_probabilities
+        
+        def plot_spectra(self, wavelengths, original_spectrum, top_spectra, top_coefficients, pixel_sample):
+            plt.figure(figsize=(10, 6))
+            plt.plot(wavelengths, original_spectrum, label='Original Pixel Spectrum')
+            for i, spectrum in enumerate(top_spectra[:self.top_n].T):
+                plt.plot(wavelengths, spectrum * top_coefficients[i], label=f'Top Spectrum {i+1}')
+            plt.xlabel('Wavelength')
+            plt.ylabel('Intensity')
+            plt.title(f'Pixel {pixel_sample} and Top {self.top_n} Spectra')
+            plt.legend()
+            plt.show()
+        
+        def plot_results(self):
+            plt.figure(figsize=(10, 6))    
+            for pixel_sample, observed_spectrum in self.pixel_y_data.items():
+                #min_value, max_value = observed_spectrum.min(), observed_spectrum.max()
+                #observed_spectrum = -1 + (observed_spectrum - min_value) * 2 / (max_value - min_value)                
+                plt.plot(self.wavelengths, observed_spectrum, label=f'Observed - {pixel_sample}')            
+            plt.plot(self.wavelengths, self.y_infer, label='Inferred', linestyle='--', linewidth=2,c='black')
+            plt.xlabel('Wavelength')
+            plt.ylabel('Intensity')
+            plt.legend()
+            plt.title(f'{self.technique}')
+            plt.grid(True)
+            plt.show()
+
+        def show_paper_im(self):
+            im = img.imread('img_cuperite_paper.png') 
+            return im
+
+        def show_image(self, pixel_samples=[]):
+            plt.title("File_Image")
+            skip = int(self.n_bands / 4)
+            imRGB = np.zeros((self.n_rows, self.n_cols, 3))
+            for i in range(3):
+                imRGB[:, :, i] = self.stretch(self.image_arr[:, :, i * skip])
             
-            
+            # Highlight each pixel sample in the grid
+            k = 1
+            for loc in pixel_samples:
+                x, y = loc                
+                for i in range(-1, 2):
+                    for j in range(-1, 2):
+                        new_y = y + i
+                        new_x = x + j
+                        if 0 <= new_y < self.n_rows and 0 <= new_x < self.n_cols:
+                            imRGB[new_y, new_x, 0] = 0
+                            imRGB[new_y, new_x, 1] = 0
+                            imRGB[new_y, new_x, 2] = k * 0.1
+                k += 1            
+            return imRGB
 
+        def show_pca(self):
+            n_components = 30
+            pca = PCA(n_components=n_components)
+            pca.fit(self.image_arr2d.T)
+            self.imag_pca = pca.transform(self.image_arr2d.T)
+            self.ImPCA = np.reshape(self.imag_pca, (self.n_rows,self.n_cols,n_components))
+            imRGBpca1 = np.zeros((self.n_rows,self.n_cols,3))
+            for i in range(3):
+                imRGBpca1[:,:,i] = self.stretch(self.ImPCA[:,:,i])        
+            imRGBpca2 = np.zeros((self.n_rows,self.n_cols,3))
+            for i in range(3):
+                imRGBpca2[:,:,i] = self.stretch(self.ImPCA[:,:,i+3])
 
-            
+        def stretch(self, arr):
+            low = np.percentile(arr, 1)
+            high = np.percentile(arr, 99)
+            arr[arr<low] = low
+            arr[arr>high] = high
+            return np.clip(np.squeeze((arr-low)/(high-low)), 0, 1)
+
+        def stretch_05(self, arr):
+            low = np.percentile(arr, 0.5)
+            high = np.percentile(arr, 99.5)
+            arr[arr<low] = low
+            arr[arr>high] = high
+            return np.clip(np.squeeze((arr-low)/(high-low)), 0, 1)
