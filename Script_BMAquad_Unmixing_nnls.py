@@ -15,6 +15,7 @@ import random
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.image as img
 from sklearn.decomposition import PCA
+import time
 
 
 if __name__ == '__main__':
@@ -48,6 +49,11 @@ else:
                 self.spectra_names = lib.names 
             else:
                 print("WARNING: library should be a .hdr file!")
+        
+        def reshape_image(self):
+            # Convert the 3D hyperspectral image array into a 2D array
+            reshaped_image = self.image_arr.reshape(self.n_rows * self.n_cols, self.n_bands)
+            return reshaped_image
 
         def load_pixel_location_info(self, pixel_location):
             if pixel_location.endswith('.csv'):
@@ -58,32 +64,51 @@ else:
         def load_chemical_data(self):
             self.chemicaldf = pd.read_csv("mineraldata2.csv", encoding='latin1')              
         
-        def generate_pixel_samples(self, mineral_type=None):
+        def generate_pixel_samples(self, mineral_type=None, region=None):
             self.ROI = []
             samples = []
 
             if mineral_type == 1:
-                self.ROI = random.choice(["alunite hill 1","alunite hill 2","alunite hill 3"])
+                if region == 1:
+                    self.ROI = ["alunite hill 1"]
+                elif region == 2:
+                    self.ROI = ["alunite hill 2"]
+                else:
+                    self.ROI = ["alunite hill 3"]
             elif mineral_type == 2:
-                self.ROI = random.choice(["montmorillonite hill 1","montmorillonite hill 2","montmorillonite hill 3","montmorillonite hill 4","montmorillonite hill 5"])
-            elif mineral_type == 3:  
-                self.ROI = random.choice(["kaolinite region 1","kaolinite region 2"])
+                if region == 1:
+                    self.ROI = ["montmorillonite hill 1"]
+                elif region == 2:
+                    self.ROI = ["montmorillonite hill 2"]
+                elif region == 3:
+                    self.ROI = ["montmorillonite hill 3"]
+                elif region == 4:
+                    self.ROI = ["montmorillonite hill 4"]
+                else:
+                    self.ROI = ["montmorillonite hill 5"]
+            elif mineral_type == 3:
+                if region == 1:
+                    self.ROI = ["kaolinite region 1"]
+                else:
+                    self.ROI = ["kaolinite region 2"]
             else:
-                self.ROI = random.choice(["hydrated silica 1","hydrated silica 2","hydrated silica 3"])
+                if region == 1:
+                    self.ROI = ["hydrated silica 1"]
+                elif region == 2:
+                    self.ROI = ["hydrated silica 2"]
+                else:
+                    self.ROI = ["hydrated silica 3"]
 
-            samples = self.df[self.df['Name'] == self.ROI].iloc[:, [2, 3]].values.tolist()
-            print(self.ROI)            
+            # Use the isin method for the comparison
+            samples = self.df[self.df['Name'].isin(self.ROI)].iloc[:, [2, 3]].values.tolist()
+            print(self.ROI)
             return samples
-        
-        def reshape_image(self):
-            # Convert the 3D hyperspectral image array into a 2D array
-            reshaped_image = self.image_arr.reshape(self.n_rows * self.n_cols, self.n_bands)
-            return reshaped_image
               
-        def selectedindex_fit(self, mineral_type=None, **kwargs):
+        def selectedindex_fit(self, mineral_type=None, region=None, **kwargs):
             self.technique = "BMA with Linear and Quadratic Terms"
-            pixel_samples = self.generate_pixel_samples(mineral_type=mineral_type)
-            
+            start_time = time.time()
+            pixel_samples = self.generate_pixel_samples(mineral_type=mineral_type,region=region)
+                        
             self.mineral_data = defaultdict(list)
             self.pixel_y_data = {}
             for pixel_sample in pixel_samples: 
@@ -172,11 +197,9 @@ else:
                     self.model_probability = np.asarray(self.model_likelihood)/self.likelihood_sum
 
                     if iteration_max_likelihood > self.max_likelihood:                     
-                        self.max_likelihood = iteration_max_likelihood                 
-
+                        self.max_likelihood = iteration_max_likelihood               
                     
                     top_models_threshold = round(0.05 * self.max_likelihood)
-
                     candidate_models = []
                     current_model_set = []
                     for i, (model_idx, model_likelihood) in enumerate(zip(self.model_index_list, self.model_likelihood)):
@@ -184,9 +207,9 @@ else:
                                 for idx in range(self.nCols):
                                     current_model_set.append(model_idx + (idx,) if model_idx else (idx,))                               
                     
-                    if top_models_threshold < self.num_elements + 1 or len(current_model_set) == 0:
-                        print("The number of variables required to for the next iteration exceed the number of candidate models")
-                        print(f"BMA is finishing early at iteration: {self.num_elements}")
+                    if len(current_model_set) == 0:
+                        #print("The number of variables required for the next iteration exceed the number of candidate models")
+                        #print(f"BMA is finishing early at iteration: {self.num_elements}")
                         break
 
                 self.probabilities = self.likelihoods / self.likelihood_sum
@@ -198,48 +221,45 @@ else:
                 self.probabilities_single_materials_only = self.probabilities/np.sum(self.probabilities)
                 self.coefficients_single_materials_only = self.coefficients/np.sum(self.probabilities)
 
-                # This is the average model that should be used from model averaging
-                #y_infer = np.dot(self.X, self.coefficients) #(This computation is fine for linear models)
-                self.y_infer = np.zeros(self.nRows)
-                for i in range(self.nCols):
-                    self.y_infer +=  self.X[:,i]*self.coefficients[i] # contribution from linear terms
-                    for j in range(self.nCols):
-                        self.y_infer +=  np.multiply(self.X[:,i],self.X[:,j])*self.coefficients_quad[i,j] # contribution from quadratic terms
-                        
-                
-                self.rmse = np.sqrt(mean_squared_error(self.y, self.y_infer))
-                
-                # select high probability spectra to plot with the model
-                # selecting spectra with a probbility greater than 0.01
-                self.model_index_set = []
-                self.model_index_name = []
-                spectra_indices_sorted_by_probablity = np.argsort(-self.probabilities_single_materials_only)
-                for i in spectra_indices_sorted_by_probablity:
-                    if self.probabilities_single_materials_only[i] > 0.01:
-                        self.model_index_set.append(i)
-                        self.model_index_name.append(self.spectra_names[i]+', p='+str(self.probabilities_single_materials_only[i]))
+                for name, prob, coef in zip(self.spectra_names, self.probabilities, self.coefficients):
+                    if prob > .1:
+                        self.mineral_data[y_index].append((name, prob, coef)) 
                          
             self.final_summary()
             self.plot_results()
+
+            end_time = time.time()
+            self.elapsed_time = end_time - start_time  
+            print(f"Run time: {self.elapsed_time} seconds") 
 
             return self
         
         def final_summary(self):
             pd.set_option('display.width', 1000)
-            most_common_abundances, most_common_probabilities = self.count_mineral()
+            average_abundances, average_probability = self.count_mineral()
 
-            indices = [self.spectra_names.index(mineral) for mineral in most_common_abundances.keys()]            
+            indices = [self.spectra_names.index(mineral) for mineral in average_abundances.keys()]            
             self.top_spectra = self.spectral_library.T[:, indices]
-            most_common_abundances_values = np.array(list(most_common_abundances.values()))
-            self.y_infer = np.dot(self.top_spectra, most_common_abundances_values)   
+            average_abundances_values = np.array(list(average_abundances.values()))
+            self.y_infer = np.dot(self.top_spectra, average_abundances_values)   
+
+            # Calculate RMSE for each pixel sample
+            rmse_values = {}
+            for pixel_sample, observed_spectrum in self.pixel_y_data.items():
+                rmse = mean_squared_error(observed_spectrum, self.y_infer, squared=False)
+                rmse_values[pixel_sample] = rmse
+            min_rmse_pixel = min(rmse_values, key=rmse_values.get)
+            min_rmse_spectrum = self.pixel_y_data[min_rmse_pixel]
+            self.min_rmse = rmse_values[min_rmse_pixel]
             
+            # Print Summary
             data = {'Name': [], 'Category': [], 'Formula': [], 'Probability': [], 'Abundance': []}
             print(f"{self.technique}-Top {self.top_n} most common minerals and their associated most common abundances:")
-            for mineral, abundance in most_common_abundances.items():
+            for mineral, abundance in average_abundances.items():
                 mineral_row = self.chemicaldf[self.chemicaldf['Name']==mineral.split()[1]].iloc[0:1]
                 mineral_category = mineral_row.iloc[0]['Category']
                 mineral_formula = mineral_row.iloc[0]['Formula']
-                probability = most_common_probabilities[mineral]
+                probability = average_probability[mineral]
 
                 data['Name'].append(mineral)
                 data['Category'].append(mineral_category)
@@ -249,6 +269,8 @@ else:
             
             df = pd.DataFrame(data)
             print(df)
+
+            self.plot_spectra_with_lowest_rmse(self.min_rmse, min_rmse_spectrum, self.y_infer, average_abundances)
             return self
         
         def count_mineral(self):
@@ -278,17 +300,19 @@ else:
                         mineral_probabilities[mineral_name].append(probability)
 
             # Initialize a dictionary to store the most common abundance and probability for each top mineral
-            most_common_abundances = {}
-            most_common_probabilities = {}
+            average_abundances = {}
+            average_probabilities = {}
             for mineral, abundances in mineral_abundances.items():
-                most_common_abundance = max(set(abundances), key=abundances.count)
-                most_common_abundances[mineral] = most_common_abundance
+                #average_abundance = max(abundances)
+                average_abundance = sum(abundances) / len(abundances)
+                average_abundances[mineral] = average_abundance
 
             for mineral, probabilities in mineral_probabilities.items():
-                most_common_probability = max(set(probabilities), key=probabilities.count)
-                most_common_probabilities[mineral] = most_common_probability
+                #average_probability = max(probabilities)
+                average_probability = sum(probabilities) / len(probabilities)
+                average_probabilities[mineral] = average_probability
 
-            return most_common_abundances, most_common_probabilities
+            return average_abundances, average_probabilities
         
         def plot_spectra(self, wavelengths, original_spectrum, top_spectra, top_coefficients, pixel_sample):
             plt.figure(figsize=(10, 6))
@@ -300,13 +324,26 @@ else:
             plt.title(f'Pixel {pixel_sample} and Top {self.top_n} Spectra')
             plt.legend()
             plt.show()
+
+        def plot_spectra_with_lowest_rmse(self, min_rmse, min_rmse_spectrum, y_infer, average_abundances):
+            plt.figure(figsize=(12, 6))
+            plt.plot(self.wavelengths, min_rmse_spectrum, label='Observed Spectrum with Lowest RMSE', linewidth=3)
+            plt.plot(self.wavelengths, y_infer, label='Inferred Spectrum', linestyle='--', linewidth=3, c='black')
+            for mineral in average_abundances.keys():
+                index = self.spectra_names.index(mineral)
+                plt.plot(self.wavelengths, self.spectral_library[index], label=f'{mineral}', alpha=0.5)
+            plt.xlabel('Wavelength')
+            plt.ylabel('Intensity')
+            plt.title(f'{self.technique} \n RMSE: {min_rmse:.2f}')
+            plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+            plt.show()
         
         def plot_results(self):
             plt.figure(figsize=(10, 6))    
             for pixel_sample, observed_spectrum in self.pixel_y_data.items():
                 #min_value, max_value = observed_spectrum.min(), observed_spectrum.max()
                 #observed_spectrum = -1 + (observed_spectrum - min_value) * 2 / (max_value - min_value)                
-                plt.plot(self.wavelengths, observed_spectrum, label=f'Observed - {pixel_sample}')            
+                plt.plot(self.wavelengths, observed_spectrum)            
             plt.plot(self.wavelengths, self.y_infer, label='Inferred', linestyle='--', linewidth=2,c='black')
             plt.xlabel('Wavelength')
             plt.ylabel('Intensity')

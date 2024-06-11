@@ -197,7 +197,7 @@ else:
                 self.coefficients = self.coefficients / self.likelihood_sum 
 
                 for name, prob, coef in zip(self.spectra_names, self.probabilities, self.coefficients):
-                    if coef > .05:
+                    if prob > .1:
                         self.mineral_data[y_index].append((name, prob, coef))
             self.final_summary()
 
@@ -207,6 +207,7 @@ else:
             # axarr[1].imshow(self.show_paper_im()) 
 
             self.plot_results() 
+
             end_time = time.time()  # End the timer
             self.elapsed_time = end_time - start_time  
             print(f"Run time: {self.elapsed_time} seconds")   
