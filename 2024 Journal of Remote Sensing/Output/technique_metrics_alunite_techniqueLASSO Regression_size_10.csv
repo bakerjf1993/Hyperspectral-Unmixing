@@ -1,0 +1,2 @@
+Technique,Average Precision,Average RMSE,Run Time (s),Model Size
+LASSO Regression,0.4879529006046863,0.010802944796159864,0.0935636281967163,8

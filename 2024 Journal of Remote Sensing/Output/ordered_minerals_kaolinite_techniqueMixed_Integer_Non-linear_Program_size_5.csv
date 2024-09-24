@@ -1,0 +1,6 @@
+Technique,Ordered Name,Coefficient
+Mixed_Integer_Non-linear_Program,"('analcime.spc Analcime GDS1', 'halloys5.spc Halloysite+Kaolinite CM29', 'kaolini1.spc Kaolinite CM9', 'calcite1.spc Calcite WS272')","(0.19896063595543076, 0.15485333471049417, 0.13678036794886214, 0.02503277609219928)"
+Mixed_Integer_Non-linear_Program,"('kaolini1.spc Kaolinite CM9', 'analcime.spc Analcime GDS1', 'carnall1.spc Carnallite NMNH98011', 'calcite1.spc Calcite WS272')","(0.32987449947493935, 0.15890048163440523, 0.05421254175149898, 0.02441904757939367)"
+Mixed_Integer_Non-linear_Program,"('kaolini1.spc Kaolinite CM9', 'analcime.spc Analcime GDS1', 'carnall1.spc Carnallite NMNH98011', 'calcite2.spc Calcite HS48.3B')","(0.27757808146900326, 0.1765944638546202, 0.05521753635226293, 0.027609545314874622)"
+Mixed_Integer_Non-linear_Program,"('kaolini1.spc Kaolinite CM9', 'analcime.spc Analcime GDS1', 'carnall2.spc Carnallite HS430.3B', 'strontia.spc Strontianite HS272.3B')","(0.26189310653141795, 0.1891687809323471, 0.05971550766282382, 0.022780962623244503)"
+Mixed_Integer_Non-linear_Program,"('kaolini1.spc Kaolinite CM9', 'analcime.spc Analcime GDS1', 'carnall1.spc Carnallite NMNH98011', 'strontia.spc Strontianite HS272.3B')","(0.30662577343098774, 0.17288006588822322, 0.07898242435683199, 0.026495859157779373)"

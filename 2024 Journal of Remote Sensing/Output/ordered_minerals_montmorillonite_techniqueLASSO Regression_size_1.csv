@@ -1,0 +1,2 @@
+Technique,Ordered Name,Coefficient
+LASSO Regression,"('analcime.spc Analcime GDS1', 'montmor8.spc Montmorillonite STx-1', 'strontia.spc Strontianite HS272.3B', 'lepidol5.spc Lepidolite NMNH105541', 'carnall1.spc Carnallite NMNH98011', 'neodymiu.spc Neodymium_Oxide GDS34', 'chlorit3.spc Chlorite SMR-13.b 60-104u')","(0.19086601, 0.059389144, 0.019060252, 0.018909736, 0.018555196, 0.015594988, 0.0062783225)"

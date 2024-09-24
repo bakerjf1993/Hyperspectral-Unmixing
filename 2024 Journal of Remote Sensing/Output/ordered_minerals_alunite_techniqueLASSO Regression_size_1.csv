@@ -1,0 +1,2 @@
+Technique,Ordered Name,Coefficient
+LASSO Regression,"('alunite1.spc Alunite GDS84 Na03', 'analcime.spc Analcime GDS1', 'alunite2.spc Alunite GDS83 Na63', 'datolit1.spc Datolite HS442.3B', 'lizardi1.spc Lizardite NMNHR4687.a 280', 'pyrophy2.spc Pyrophyllite PYS1A <850um', 'topazi.spc Topaz HS184.3B')","(0.32779405, 0.14670566, 0.02566804, 0.018781299, 0.0097509585, 0.008991823, 0.0013181389)"

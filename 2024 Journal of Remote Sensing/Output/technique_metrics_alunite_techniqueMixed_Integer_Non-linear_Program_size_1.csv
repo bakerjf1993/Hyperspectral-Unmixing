@@ -1,0 +1,2 @@
+Technique,Average Precision,Average RMSE,Run Time (s),Model Size
+Mixed_Integer_Non-linear_Program,0.2708333333333333,0.004333346349786787,230.33525681495667,4

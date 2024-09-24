@@ -1,0 +1,2 @@
+Technique,Average Precision,Average RMSE,Run Time (s),Model Size
+Forward Stepwise Regression,0.5208333333333333,0.011680036801123141,4.383489370346069,4
