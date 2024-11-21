@@ -78,12 +78,8 @@ else:
         def run_techniques_multiple_times(self, mineral_type=None, region=None):
             if mineral_type == 1:
                 self.ROI = "Alunite"
-            elif mineral_type == 2:
-                self.ROI = "Montmorillonite"
-            elif mineral_type == 3:
-                self.ROI = "Kaolinite"
             else:
-                self.ROI = "Hydrated silica"
+                self.ROI = "Kaolinite"
 
             techniques = {
                 'OLS': OLS,
@@ -104,46 +100,55 @@ else:
                     spectral_library_filename
                 )
                 if technique_name == 'STEPWISE':
-                    technique.forward_selectedindex_fit(mineral_type=mineral_type, region=region)                    
-                    rmse = technique.min_rmse 
-                    model_size = technique.top_n  
-                    runtime = technique.elapsed_time                     
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime})
+                    technique.forward_selectedindex_fit(mineral_type=mineral_type, region=region)
+                    technique_name_stepwise =  technique.technique                   
+                    rmse = technique.rmse_mean 
+                    model_size = technique.model_size_mean  
+                    runtime = technique.computation_time_mean
+                    detection = technique.target_mineral_proportion                     
+                    self.results.append({'technique': technique_name_stepwise, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
-                    technique.backward_selectedindex_fit(mineral_type=mineral_type, region=region)                    
-                    rmse = technique.min_rmse 
-                    model_size = technique.top_n  
-                    runtime = technique.elapsed_time                     
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime})
+                    technique.backward_selectedindex_fit(mineral_type=mineral_type, region=region) 
+                    technique_name_stepwise =  technique.technique                   
+                    rmse = technique.rmse_mean 
+                    model_size = technique.model_size_mean  
+                    runtime = technique.computation_time_mean      
+                    detection = technique.target_mineral_proportion                
+                    self.results.append({'technique': technique_name_stepwise, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
                 elif technique_name == 'BMA':
                     technique.selectedindex_fit(mineral_type=mineral_type, region=region, MaxVars=2)                        
-                    rmse = technique.min_rmse  
-                    model_size = technique.top_n  
-                    runtime = technique.elapsed_time                         
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime})
+                    rmse = technique.rmse_mean  
+                    model_size = technique.model_size_mean  
+                    runtime = technique.computation_time_mean    
+                    detection = technique.target_mineral_proportion                      
+                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
                 elif technique_name == 'BMAquad':
                     technique.selectedindex_fit(mineral_type=mineral_type, region=region, MaxVars=2)                        
-                    rmse = technique.min_rmse  
-                    model_size = technique.top_n  
-                    runtime = technique.elapsed_time                         
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime})
+                    rmse = technique.rmse_mean  
+                    model_size = technique.model_size_mean  
+                    runtime = technique.computation_time_mean  
+                    detection = technique.target_mineral_proportion                        
+                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
                 else:
                     technique.selectedindex_fit(mineral_type=mineral_type, region=region)  
-                    rmse = technique.min_rmse  
-                    model_size = technique.top_n     
-                    runtime = technique.elapsed_time                         
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime})
+                    rmse = technique.rmse_mean  
+                    model_size = technique.model_size_mean     
+                    runtime = technique.computation_time_mean  
+                    detection = technique.target_mineral_proportion                        
+                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
             print(self.results)
+            df = pd.DataFrame(self.results)
+            df.to_csv(f"compare_results_{self.ROI}.csv", index=False)
 
             self.plot_results()
             
             return self
         
         def plot_results(self):
-            colors = {'OLS': 'blue', 'NNLS': 'red', 'RIDGE': 'green', 'LASSO': 'purple', 'STEPWISE': 'orange','BMA':'black','BMAquad':'darkgrey'}
+            colors = {'OLS': 'blue', 'NNLS': 'red', 'RIDGE': 'green', 'LASSO': 'purple', 'Forward Stepwise': 'orange', 'Backward Stepwise': 'brown','BMA':'black','BMAquad':'darkgrey'}
             legend_elements = [Line2D([0], [0], marker='o', color='w', label=key,
                                     markerfacecolor=color, markersize=10) for key, color in colors.items()]
             
@@ -153,8 +158,8 @@ else:
                             color=colors[result['technique']])
             
             plt.legend(handles=legend_elements, title='Techniques',loc='center left', bbox_to_anchor=(1, 0.5))
-            plt.xlabel('Runtime (seconds)')
-            plt.ylabel('RMSE')
+            plt.xlabel('Average Runtime (seconds)')
+            plt.ylabel('Average RMSE')
             plt.title(f'{self.ROI} Model Comparison')
             plt.gcf().patch.set_alpha(0)
             plt.show()
