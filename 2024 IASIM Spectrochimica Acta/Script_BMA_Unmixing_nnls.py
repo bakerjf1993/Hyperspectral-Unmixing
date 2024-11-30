@@ -3,25 +3,18 @@ import pandas as pd
 import spectral.io.envi as envi
 from itertools import combinations
 import matplotlib.pyplot as plt
-from statsmodels.regression.linear_model import OLS
-from itertools import chain
 from scipy.optimize import nnls
 from sklearn.metrics import mean_squared_error
 from collections import defaultdict
-from collections import Counter
-import statistics
-import random
-from sklearn.preprocessing import MinMaxScaler
-import matplotlib.image as img
-from sklearn.decomposition import PCA
 import time
+
 
 
 if __name__ == '__main__':
     print("Running BMA_Umixing_nnls.py. Run from 'Run' notebook")
 else:
     
-    class BMA_nnls:
+    class BMA:
         def __init__(self, image_hdr_filename, image_filename, pixel_location, spectral_library_filename):
             self.load_new_image(image_hdr_filename, image_filename)
             self.load_pixel_location_info(pixel_location)
@@ -68,66 +61,47 @@ else:
             samples = []
 
             if mineral_type == 1:
-                self.ROI_name = "Alunite"
+                self.target_mineral = "alunite"
                 if region == 1:
                     self.ROI = ["alunite hill 1"]
-                elif region == 2:
-                    self.ROI = ["alunite hill 2"]
                 else:
-                    self.ROI = ["alunite hill 3"]
-            elif mineral_type == 2:
-                self.ROI_name = "montmorillonite"
-                if region == 1:
-                    self.ROI = ["montmorillonite hill 1"]
-                elif region == 2:
-                    self.ROI = ["montmorillonite hill 2"]
-                elif region == 3:
-                    self.ROI = ["montmorillonite hill 3"]
-                elif region == 4:
-                    self.ROI = ["montmorillonite hill 4"]
-                else:
-                    self.ROI = ["montmorillonite hill 5"]
-            elif mineral_type == 3:
-                self.ROI_name = "Kaolinite"
+                    self.ROI = ["alunite hill 2"]    
+            else:
+                self.target_mineral = "kaolinite"
                 if region == 1:
                     self.ROI = ["kaolinite region 1"]
                 else:
                     self.ROI = ["kaolinite region 2"]
-            elif mineral_type == 4:
-                self.ROI_name = "hydrated silica"
-                if region == 1:
-                    self.ROI = ["hydrated silica 1"]
-                elif region == 2:
-                    self.ROI = ["hydrated silica 2"]
-                else:
-                    self.ROI = ["hydrated silica 3"]
-            else:
-                self.ROI_name = "montmorillonite"
-                if region == 1:
-                    self.ROI = ["montmorillonite 1"]
-                elif region == 2:
-                    self.ROI = ["montmorillonite 2"]
-                elif region == 3:
-                    self.ROI = ["montmorillonite 3"]
-                elif region == 4:
-                    self.ROI = ["montmorillonite 4"]
-                else:
-                    self.ROI = ["montmorillonite 5"]
-
+            
             # Use the isin method for the comparison
             samples = self.df[self.df['Name'].isin(self.ROI)].iloc[:, [2, 3]].values.tolist()
             print(self.ROI)
             return samples
               
         def selectedindex_fit(self, mineral_type=None, region=None, **kwargs):
-            self.technique = "BMA_nnls"
-            start_time = time.time()
+            self.technique = "BMA"
             pixel_samples = self.generate_pixel_samples(mineral_type=mineral_type,region=region)
             self.num_pixels = len(pixel_samples)
-            
+
             self.mineral_data = defaultdict(list)
+            self.inferred_data = defaultdict(list)
             self.pixel_y_data = {}
+            self.rmse_list = []
+            self.adjusted_r_squared_list = []
+            self.computation_time = []
+            self.model_size = []
+            inclusion_count = 0
+            self.contributing_spectra = pd.DataFrame(columns=["Pixel", "Spectrum", "Coefficient"])
+            
+            if self.target_mineral.lower() == 'alunite':
+                keywords = ['alunite', 'alun']
+            elif self.target_mineral.lower() == 'kaolinite':
+                keywords = ['kaolin', 'kaolinite', 'kaolin/smect', 'kaosmec']
+            else:
+                keywords = [self.target_mineral.lower()]
+
             for pixel_sample in pixel_samples: 
+                start_time = time.time()
                 y_index = tuple(pixel_sample)
                 self.y = self.df[(self.df.iloc[:, 2] == y_index[0]) & (self.df.iloc[:, 3] == y_index[1])].iloc[:, 4:].values.flatten()
                 self.pixel_y_data[y_index] = self.y
@@ -137,7 +111,8 @@ else:
                 self.nRows, self.nCols = np.shape(self.X)
                 self.likelihoods = np.zeros(self.nCols)
                 self.coefficients = np.zeros(self.nCols)
-                self.probabilities = np.zeros(self.nCols)
+                self.probabilities = np.zeros(self.nCols)                
+                self.non_zero_spectral_names = []
 
                 if 'MaxVars' in kwargs.keys():
                     self.MaxVars = kwargs['MaxVars']
@@ -161,22 +136,26 @@ else:
                 candidate_models = list(range(self.nCols))
                 current_model_set = list(combinations(candidate_models, self.num_elements)) 
 
+                # Sets the maximuum number variables of we plan to explore
                 for self.num_elements in range(1, self.MaxVars + 1):
                     self.model_index_set = None
                     iteration_max_likelihood = 0
                     self.model_index_list = []
                     self.model_likelihood = [] 
                     
+                    # We are iterating over every possible model combination up to max vars
                     for model_combination in current_model_set:
                         
                         model_X = self.X[:, list(model_combination)]
                         model_coefficients, _ = nnls(model_X, self.y)
 
+                        # Calculates the model likelihood
                         rss = np.sum((self.y - np.dot(model_X, model_coefficients)) ** 2)
                         k = model_X.shape[1]  
                         n = self.y.shape[0]
                         bic = n * np.log(rss / n) + k * np.log(n)
                         model_likelihood = np.exp(-bic / 2) * np.prod(self.Priors[list(model_combination)])
+                        
                         
                         if model_likelihood > iteration_max_likelihood:
                             iteration_max_likelihood = model_likelihood
@@ -196,6 +175,7 @@ else:
                     if iteration_max_likelihood > self.max_likelihood:
                         self.max_likelihood = iteration_max_likelihood                                  
 
+                    # Sets a threshold for which models/model pairs to include for the next iteration
                     top_models_threshold = round(0.05 * self.max_likelihood)
                     candidate_models = []
                     current_model_set = []
@@ -210,27 +190,152 @@ else:
                         print(f"BMA is finishing early at iteration: {self.num_elements}")
                         break
 
+                # Calculates the average model probabilities and coefficients
                 self.probabilities = self.likelihoods / self.likelihood_sum
                 self.coefficients = self.coefficients / self.likelihood_sum 
+ 
+                y_infer = np.zeros_like(self.y)
 
+                p = 0 # number of features 
+                rows = []
+                
+                # Detemines the most likely features
                 for name, prob, coef in zip(self.spectra_names, self.probabilities, self.coefficients):
                     if prob > .1:
                         self.mineral_data[y_index].append((name, prob, coef))
-            self.final_summary()
+                        index = self.spectra_names.index(name)
+                        spectrum = self.spectral_library[index]
+                        y_infer += coef * spectrum # Calculate y_infer 
+                        p += 1
+                        self.non_zero_spectral_names.append(name) 
+                        rows.append({"Pixel": pixel_sample,"Name":name, "Spectrum": spectrum, "Coefficient": coef})               
 
-            # Uncomment these lines if you want to visualize results
-            # f, axarr = plt.subplots(1, 2, figsize=(10, 10))
-            # axarr[0].imshow(self.show_image(pixel_samples))
-            # axarr[1].imshow(self.show_paper_im()) 
+                pixel_contributing_spectra = pd.DataFrame(rows)
+                self.contributing_spectra = pd.concat([self.contributing_spectra, pixel_contributing_spectra], ignore_index=True)
+                # Calculate RMSE
+                pixel_rmse = np.sqrt(mean_squared_error(self.y, y_infer))
 
-            self.plot_results() 
+                                                        
+                end_time = time.time()
+                elapsed_time = end_time - start_time 
 
-            end_time = time.time()  # End the timer
-            self.elapsed_time = end_time - start_time  
-            print(f"Run time: {self.elapsed_time} seconds")   
-            return self
+                # Save information from each pixel
+                self.inferred_data[y_index].append((y_infer, pixel_rmse))
+                self.rmse_list.append(pixel_rmse)
+                self.computation_time.append(elapsed_time)
+                self.model_size.append(p)
 
+                if any(keyword in name.lower() for keyword in keywords for name in self.non_zero_spectral_names):
+                    inclusion_count += 1  
+
+            # Calculate other pixel averages   
+            self.rmse_mean = np.mean(self.rmse_list)
+            self.rmse_std = np.std(self.rmse_list)
+            self.computation_time_mean = np.mean(self.computation_time)
+            self.model_size_mean = np.mean(self.model_size)  
+
+            # Calculate target detection rate
+            self.target_mineral_proportion = inclusion_count / self.num_pixels if self.num_pixels > 0 else 0  
         
+            print(f"Number of pixel samples analyzed: {self.num_pixels}")
+            print(f"Average unmixing computation time: {self.computation_time_mean}")
+            print(f"Average RMSE: {self.rmse_mean}")
+            print(f"Number of models including the target mineral: {inclusion_count}")
+            print(f"Proportion of models including the target mineral: {self.target_mineral_proportion:.4f}")
+            
+            self.plot_mean_rmse_spectrum()
+            self.final_summary()
+            self.plot_results() 
+        
+        def plot_mean_rmse_spectrum(self):
+            # Find the pixel sample with the closest RMSE to the mean RMSE
+            mean_rmse = np.mean(self.rmse_list)
+            closest_index_mean = np.argmin(np.abs(np.array(self.rmse_list) - mean_rmse))
+
+            pixel_data = self.inferred_data[list(self.pixel_y_data.keys())[closest_index_mean]]
+            inferred_spectrum, rmse = pixel_data[0]
+
+            closest_pixel = list(self.pixel_y_data.keys())[closest_index_mean]
+            closest_pixel_tuple = tuple(closest_pixel)
+            observed_spectrum = self.pixel_y_data[closest_pixel]
+
+            contributing_spectra_pixel = self.contributing_spectra[
+                self.contributing_spectra["Pixel"].apply(lambda x: tuple(x) == closest_pixel_tuple)
+            ]
+
+            data = []
+            for _, row in contributing_spectra_pixel.iterrows():
+                name = row["Name"]
+                coefficient = row["Coefficient"]
+                spectrum = row["Spectrum"]
+
+                # Match the chemical data
+                match = self.chemicaldf[self.chemicaldf['Name'] == name]
+                if not match.empty:
+                    category = match.iloc[0]['Category']
+                    formula = match.iloc[0]['Formula']
+                else:
+                    category = str(self.chemicaldf[self.chemicaldf['Name']==name.split()[1]].iloc[0:1].iloc[0]['Category'])
+                    formula = str(self.chemicaldf[self.chemicaldf['Name']==name.split()[1]].iloc[0:1].iloc[0]['Formula'])
+
+                # Add to the data
+                data.append([name, category, formula, coefficient, spectrum])
+
+            mineral_table = pd.DataFrame(data, columns=["Name", "Category", "Formula", "Coefficient","Spectrum"])
+            mineral_table["Coefficient"] = mineral_table["Coefficient"].round(4)
+
+            
+            plt.figure(figsize=(12, 8))
+            plt.plot(self.wavelengths, observed_spectrum, label="Observed Spectrum", linewidth=3)
+            plt.plot(self.wavelengths, inferred_spectrum, label="Inferred Spectrum (Mean RMSE)", linestyle="--", linewidth=3, color="black")
+
+            
+            for _, row in mineral_table.iterrows():
+                scaled_spectrum = row["Spectrum"] * row["Coefficient"]
+                plt.plot(self.wavelengths, scaled_spectrum, label=f"{row['Name']} (x{row['Coefficient']:.2f})", alpha=0.5)
+                        
+            plt.suptitle(self.technique)
+            plt.title(f"Observed vs. Inferred Spectrum (Mean RMSE: {mean_rmse:.4f})", fontsize=14)
+            plt.xlabel("Wavelength", fontsize=12)
+            plt.ylabel("Intensity", fontsize=12)
+            plt.legend(ncol=2,bbox_to_anchor=(.95, -0.15))
+            plt.grid(True)
+            plt.show()
+
+            # Print the table
+            print("\nMinerals Contributing to Inferred Spectrum:")
+            print(mineral_table.to_string(index=False))
+
+            # Display the table as a plot (optional)
+            fig, ax = plt.subplots(figsize=(12, 2))
+            ax.axis('tight')
+            ax.axis('off')
+            formatted_data = [
+                [
+                    row[0] if len(row[0]) <= 60 else f"{row[0][:17]}...",  # Truncate long names
+                    row[1],  # Category
+                    row[2],  # Formula
+                    f"{row[3]:.4f}"  # Ensure rounding in the plot
+                ]
+                for row in mineral_table.values
+            ]
+
+            table = ax.table(
+                cellText=formatted_data,
+                colLabels=mineral_table.columns,
+                cellLoc="center",
+                loc="center"
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1.5, 1.5)  # Scale table for larger size
+
+            # Adjust column widths to fit content
+            for key, cell in table.get_celld().items():
+                cell.set_text_props(ha="center", va="center")  # Center align text
+
+            plt.show()
+
         def final_summary(self):
             pd.set_option('display.width', 1000)
             average_abundances, average_probability = self.count_mineral()
@@ -269,29 +374,20 @@ else:
 
             self.plot_spectra_with_lowest_rmse(self.min_rmse, min_rmse_spectrum, self.y_infer, average_abundances)
             return self
-        
+
         def count_mineral(self):
             counts = [len(abundances) for abundances in self.mineral_data.values()]
             #self.top_n = statistics.mode(counts)
             self.top_n = round(sum(counts)/len(counts))
 
             # Count the occurrences of each mineral
-            mineral_counts = {}            
-            accuracy_count = 0 
+            mineral_counts = {} 
             for abundances in self.mineral_data.values():
-                loop_count = 0
                 for mineral_abundance in abundances:
                     mineral_name = mineral_abundance[0]                    
                     if mineral_name not in mineral_counts:
                         mineral_counts[mineral_name] = 0
                     mineral_counts[mineral_name] += 1
-                    if self.ROI_name in mineral_name:
-                        if loop_count < 1:
-                            accuracy_count += 1
-                            loop_count += 1
-                
-            self.accuracy_level = accuracy_count/self.num_pixels * 100
-            print(f"Percent Accracy: {round(self.accuracy_level)}%")
 
             # Get the top n most common minerals
             top_minerals = sorted(mineral_counts, key=mineral_counts.get, reverse=True)[:self.top_n]            
@@ -358,71 +454,3 @@ else:
             plt.grid(True)
             plt.gcf().patch.set_alpha(0)
             plt.show()
-
-        def show_paper_im(self):
-            im = img.imread('img_cuperite_paper.png') 
-            return im
-
-        def show_image(self, pixel_samples=[]):
-            plt.title("File_Image")
-            skip = int(self.n_bands / 4)
-            imRGB = np.zeros((self.n_rows, self.n_cols, 3))
-            for i in range(3):
-                imRGB[:, :, i] = self.stretch(self.image_arr[:, :, i * skip])
-            
-            # Highlight each pixel sample in the grid
-            k = 1
-            for loc in pixel_samples:
-                x, y = loc                
-                for i in range(-1, 2):
-                    for j in range(-1, 2):
-                        new_y = y + i
-                        new_x = x + j
-                        if 0 <= new_y < self.n_rows and 0 <= new_x < self.n_cols:
-                            imRGB[new_y, new_x, 0] = 0
-                            imRGB[new_y, new_x, 1] = 0
-                            imRGB[new_y, new_x, 2] = k * 0.1
-                k += 1            
-            return imRGB
-
-        def show_pca(self):
-            n_components = 30
-            pca = PCA(n_components=n_components)
-            pca.fit(self.image_arr2d.T)
-            self.imag_pca = pca.transform(self.image_arr2d.T)
-            self.ImPCA = np.reshape(self.imag_pca, (self.n_rows,self.n_cols,n_components))
-            imRGBpca1 = np.zeros((self.n_rows,self.n_cols,3))
-            for i in range(3):
-                imRGBpca1[:,:,i] = self.stretch(self.ImPCA[:,:,i])        
-            imRGBpca2 = np.zeros((self.n_rows,self.n_cols,3))
-            for i in range(3):
-                imRGBpca2[:,:,i] = self.stretch(self.ImPCA[:,:,i+3])
-
-        def stretch(self, arr):
-            low = np.percentile(arr, 1)
-            high = np.percentile(arr, 99)
-            arr[arr<low] = low
-            arr[arr>high] = high
-            return np.clip(np.squeeze((arr-low)/(high-low)), 0, 1)
-
-        def stretch_05(self, arr):
-            low = np.percentile(arr, 0.5)
-            high = np.percentile(arr, 99.5)
-            arr[arr<low] = low
-            arr[arr>high] = high
-            return np.clip(np.squeeze((arr-low)/(high-low)), 0, 1)
-            
-            
-
-             
-
-            
-            
-
-             
-
-            
-            
-
-
-            

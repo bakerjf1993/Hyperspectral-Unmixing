@@ -2,14 +2,13 @@ import numpy as np
 import pandas as pd 
 import spectral.io.envi as envi
 import matplotlib.pyplot as plt
-from scipy.optimize import nnls
 from sklearn.linear_model import Lasso
-from sklearn.decomposition import PCA
-import matplotlib.image as img
 from sklearn.metrics import mean_squared_error
-import statistics
 from collections import defaultdict
 import time
+
+import warnings
+from sklearn.exceptions import ConvergenceWarning
 
 
 if __name__ == '__main__':
@@ -63,78 +62,57 @@ else:
             samples = []
 
             if mineral_type == 1:
-                self.ROI_name = "Alunite"
+                self.target_mineral = "alunite"
                 if region == 1:
                     self.ROI = ["alunite hill 1"]
-                elif region == 2:
-                    self.ROI = ["alunite hill 2"]
                 else:
-                    self.ROI = ["alunite hill 3"]
-            elif mineral_type == 2:
-                self.ROI_name = "Montmorillonite"
-                if region == 1:
-                    self.ROI = ["montmorillonite hill 1"]
-                elif region == 2:
-                    self.ROI = ["montmorillonite hill 2"]
-                elif region == 3:
-                    self.ROI = ["montmorillonite hill 3"]
-                elif region == 4:
-                    self.ROI = ["montmorillonite hill 4"]
-                else:
-                    self.ROI = ["montmorillonite hill 5"]
-            elif mineral_type == 3:
-                self.ROI_name = "Kaolinite"
+                    self.ROI = ["alunite hill 2"]    
+            else:
+                self.target_mineral = "kaolinite"
                 if region == 1:
                     self.ROI = ["kaolinite region 1"]
                 else:
                     self.ROI = ["kaolinite region 2"]
-            elif mineral_type == 4:
-                self.ROI_name = "hydrated silica"
-                if region == 1:
-                    self.ROI = ["hydrated silica 1"]
-                elif region == 2:
-                    self.ROI = ["hydrated silica 2"]
-                else:
-                    self.ROI = ["hydrated silica 3"]
-            else:
-                self.ROI_name = "montmorillonite"
-                if region == 1:
-                    self.ROI = ["montmorillonite 1"]
-                elif region == 2:
-                    self.ROI = ["montmorillonite 2"]
-                elif region == 3:
-                    self.ROI = ["montmorillonite 3"]
-                elif region == 4:
-                    self.ROI = ["montmorillonite 4"]
-                else:
-                    self.ROI = ["montmorillonite 5"]
-
-
+            
             # Use the isin method for the comparison
             samples = self.df[self.df['Name'].isin(self.ROI)].iloc[:, [2, 3]].values.tolist()
             print(self.ROI)
             return samples
-
               
         def selectedindex_fit(self, mineral_type=None, region=None):
             self.technique = "LASSO Regression"
-            start_time = time.time()
+           
             pixel_samples = self.generate_pixel_samples(mineral_type=mineral_type,region=region)
             self.num_pixels = len(pixel_samples)
 
             self.mineral_data = defaultdict(list)
             self.pixel_y_data = {}
+            self.rmse_list = []
+            self.adjusted_r_squared_list = []
+            self.y_infer_data= []
+            self.computation_time = []
+            self.model_size = []
+            inclusion_count = 0
+
+            if self.target_mineral.lower() == 'alunite':
+                keywords = ['alunite', 'alun']
+            elif self.target_mineral.lower() == 'kaolinite':
+                keywords = ['kaolin', 'kaolinite', 'kaolin/smect', 'kaosmec']
+            else:
+                keywords = [self.target_mineral.lower()]
+            
             for pixel_sample in pixel_samples: 
-                # Obtain observed spectra from samples and store for later use               
+                start_time = time.time()
                 y_index = tuple(pixel_sample)
-                #self.y = self.image_arr[y_index[0], y_index[1], :].flatten()
                 self.y = self.df[(self.df.iloc[:, 2] == y_index[0]) & (self.df.iloc[:, 3] == y_index[1])].iloc[:, 4:].values.flatten()
+                self.y = self.y[:50]
                 self.pixel_y_data[y_index] = self.y 
 
                 self.X = self.spectral_library.T
 
                 # Fit the spectral library to each pixel sample
                 lasso_model = Lasso(alpha=.0004, positive=True)
+                #print([len(self.X), len(self.y)])    
                 lasso_model.fit(self.X, self.y)
                 self.model_coefficients = lasso_model.coef_
 
@@ -142,23 +120,137 @@ else:
                 self.non_zero_coefficients = self.model_coefficients[self.non_zero_indices]
                 self.non_zero_spectral_names = [self.spectra_names[index] for index in self.non_zero_indices]
 
-                # Used for count function
-                self.mineral_data[f'{pixel_sample}'] = list(zip(self.non_zero_spectral_names, self.non_zero_coefficients))    
-                #plt.plot(self.wl,self.y)  
-                #plt.save('test.png')      
-            
-            self.final_summary()
+                y_infer = np.dot(self.X[:, self.model_coefficients != 0], self.non_zero_coefficients)
+                pixel_rmse = np.sqrt(mean_squared_error(self.y, y_infer))
+                
+                #r_squared = r2_score(self.y, y_infer)
+                r_squared = 1 - (sum((self.y - y_infer)**2)/sum((self.y-np.mean(self.y))**2))
+                n = len(self.y)  
+                p = len(self.non_zero_coefficients)  
+                adjusted_r_squared = 1 - (1 - r_squared) * (n - 1) / (n - p - 1)
 
-            f, axarr = plt.subplots(1,2,figsize=(15, 15))
-            axarr[0].imshow(self.show_image(pixel_samples))
-            axarr[1].imshow(self.show_paper_im()) 
+                end_time = time.time()
+                elapsed_time = end_time - start_time                
+                
+                self.y_infer_data.append(y_infer)
+                self.mineral_data[f'{pixel_sample}'] = list(zip(self.non_zero_spectral_names, self.non_zero_coefficients))
+                self.rmse_list.append(pixel_rmse)
+                self.adjusted_r_squared_list.append(adjusted_r_squared)
+                self.computation_time.append(elapsed_time)
+                self.model_size.append(len(self.non_zero_coefficients))
 
-            self.plot_results()
-            end_time = time.time()  # End the timer
-            self.elapsed_time = end_time - start_time  
-            print(f"Run time: {self.elapsed_time} seconds")
-            return self      
+                if any(keyword in name.lower() for keyword in keywords for name in self.non_zero_spectral_names):
+                    inclusion_count += 1 
+                     
+            self.rmse_mean = np.mean(self.rmse_list)
+            self.rmse_std = np.std(self.rmse_list)
+            self.adjusted_r_squared_mean = np.mean(self.adjusted_r_squared_list)
+            self.adjusted_r_squared_std = np.std(self.adjusted_r_squared_list)  
+
+            self.computation_time_mean = np.mean(self.computation_time)
+            self.model_size_mean = np.mean(self.model_size)   
+
+            total_pixel_samples = len(pixel_samples)
+            self.target_mineral_proportion = inclusion_count / total_pixel_samples if total_pixel_samples > 0 else 0       
         
+            print(f"Number of pixel samples analyzed: {total_pixel_samples}")
+            print(f"Average unmixing computation time: {self.computation_time_mean}")
+            print(f"Average RMSE: {self.rmse_mean}")
+            print(f"Number of models including the target mineral: {inclusion_count}")
+            print(f"Proportion of models including the target mineral: {self.target_mineral_proportion:.4f}")
+            
+            self.plot_mean_rmse_spectrum() 
+            self.final_summary()
+            self.plot_results()   
+        
+        def plot_mean_rmse_spectrum(self):
+            # Find the pixel sample with the closest RMSE to the mean RMSE
+            mean_rmse = np.mean(self.rmse_list)
+            closest_index_mean = np.argmin(np.abs(np.array(self.rmse_list) - mean_rmse))
+
+            inferred_spectrum = self.y_infer_data[closest_index_mean]
+            closest_pixel = list(self.pixel_y_data.keys())[closest_index_mean]
+            observed_spectrum = self.pixel_y_data[closest_pixel]
+
+            # Retrieve the contributing spectra and coefficients for the closest pixel
+            lasso_model = Lasso(alpha=.0004, positive=True)
+            lasso_model.fit(self.spectral_library.T, observed_spectrum)
+            model_coefficients = lasso_model.coef_
+
+            non_zero_indices = np.where(model_coefficients != 0)[0]
+            non_zero_coefficients = model_coefficients[non_zero_indices]
+            non_zero_spectral_names = [self.spectra_names[i] for i in non_zero_indices]
+
+            # Plot the observed and inferred spectra
+            plt.figure(figsize=(12, 8))
+            plt.plot(self.wavelengths, observed_spectrum, label="Observed Spectrum", linewidth=3)
+            plt.plot(self.wavelengths, inferred_spectrum, label="Inferred Spectrum (Mean RMSE)", linestyle="--", linewidth=3, color="black")
+
+            # Add individual contributing spectra scaled by their coefficients
+            for i, spectrum_index in enumerate(non_zero_indices):
+                scaled_spectrum = self.spectral_library[spectrum_index, :] * non_zero_coefficients[i]
+                plt.plot(self.wavelengths, scaled_spectrum, label=f"{non_zero_spectral_names[i]} (x{non_zero_coefficients[i]:.2f})", alpha=0.5)
+
+            plt.suptitle(self.technique)
+            plt.title(f"Observed vs. Inferred Spectrum (Mean RMSE: {mean_rmse:.4f})", fontsize=14)
+            plt.xlabel("Wavelength", fontsize=12)
+            plt.ylabel("Intensity", fontsize=12)
+            plt.legend(ncol=2,bbox_to_anchor=(.95, -0.15))
+            plt.grid(True)
+            plt.show()
+
+            data = []
+            for name, coefficient in zip(non_zero_spectral_names, non_zero_coefficients):
+                # Find the category and formula for the mineral
+                match = self.chemicaldf[self.chemicaldf['Name']==name.split()[1]].iloc[0:1]
+                if not match.empty:
+                    category = match.iloc[0]['Category']
+                    formula = match.iloc[0]['Formula']
+                else:
+                    category = "Unknown"
+                    formula = "Unknown"
+
+                # Append to the table data
+                data.append([name, category, formula, round(coefficient, 4)])
+
+            # Create a DataFrame for the table
+            mineral_table = pd.DataFrame(data, columns=["Mineral", "Category", "Formula", "Abundance"])
+            mineral_table = mineral_table.sort_values(by="Abundance", ascending=False)
+
+            # Print the table
+            print("\nMinerals Contributing to Inferred Spectrum:")
+            print(mineral_table.to_string(index=False))
+
+            # Display the table as a plot (optional)
+            fig, ax = plt.subplots(figsize=(10, 2))
+            ax.axis('tight')
+            ax.axis('off')
+            formatted_data = [
+                [
+                    row[0] if len(row[0]) <= 60 else f"{row[0][:17]}...",  # Truncate long names
+                    row[1],  # Category
+                    row[2],  # Formula
+                    f"{row[3]:.4f}"  # Ensure rounding in the plot
+                ]
+                for row in mineral_table.values
+            ]
+
+            table = ax.table(
+                cellText=formatted_data,
+                colLabels=mineral_table.columns,
+                cellLoc="center",
+                loc="center"
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1.5, 1.5)  # Scale table for larger size
+
+            # Adjust column widths to fit content
+            for key, cell in table.get_celld().items():
+                cell.set_text_props(ha="center", va="center")  # Center align text
+
+            plt.show()
+
         def final_summary(self):
             pd.set_option('display.width', 1000)
             # Determine the number of top minerals based on the most common minerals in the model             
@@ -203,24 +295,14 @@ else:
             #self.top_n = statistics.mode(counts)
             self.top_n = round(sum(counts)/len(counts))
 
-            # Count the occurrences of each mineral
-            mineral_counts = {}            
-            accuracy_count = 0 
+            ## Count the occurrences of each mineral
+            mineral_counts = {} 
             for abundances in self.mineral_data.values():
-                loop_count = 0
                 for mineral_abundance in abundances:
                     mineral_name = mineral_abundance[0]                    
                     if mineral_name not in mineral_counts:
                         mineral_counts[mineral_name] = 0
                     mineral_counts[mineral_name] += 1
-                    if self.ROI_name in mineral_name:
-                        if loop_count < 1:
-                            accuracy_count += 1
-                            loop_count += 1
-                
-            self.accuracy_level = accuracy_count/self.num_pixels * 100
-            print(f"Percent Accracy: {round(self.accuracy_level)}%")
-
             # Get the top n most common minerals
             top_minerals = sorted(mineral_counts, key=mineral_counts.get, reverse=True)[:self.top_n]
 
@@ -267,57 +349,3 @@ else:
             #plt.rcParams.update({'font.size': 20})
             plt.gcf().patch.set_alpha(0)
             plt.show()
-
-        def show_paper_im(self):
-            im = img.imread('img_cuperite_paper.png') 
-            return im
-
-        def show_image(self,pix=[]):
-            
-            plt.title("File_Image")
-            skip = int(self.n_bands / 4)
-            imRGB = np.zeros((self.n_rows,self.n_cols,3))
-            for i in range(3):
-                imRGB[:,:,i] = self.stretch(self.image_arr[:,:,i * skip])
-            for loc in pix:
-                imRGB[loc[1],loc[0],0] = 1
-                imRGB[loc[1],loc[0],1] = 0
-                imRGB[loc[1],loc[0],2] = 0
-            return imRGB
-
-        def show_pca(self):
-            n_components = 30
-            pca = PCA(n_components=n_components)
-            pca.fit(self.image_arr2d.T)
-            self.imag_pca = pca.transform(self.image_arr2d.T)
-            self.ImPCA = np.reshape(self.imag_pca, (self.n_rows,self.n_cols,n_components))
-            imRGBpca1 = np.zeros((self.n_rows,self.n_cols,3))
-            for i in range(3):
-                imRGBpca1[:,:,i] = self.stretch(self.ImPCA[:,:,i])        
-            imRGBpca2 = np.zeros((self.n_rows,self.n_cols,3))
-            for i in range(3):
-                imRGBpca2[:,:,i] = self.stretch(self.ImPCA[:,:,i+3])
-
-        def stretch(self, arr):
-            low = np.percentile(arr, 1)
-            high = np.percentile(arr, 99)
-            arr[arr<low] = low
-            arr[arr>high] = high
-            return np.clip(np.squeeze((arr-low)/(high-low)), 0, 1)
-
-        def stretch_05(self, arr):
-            low = np.percentile(arr, 0.5)
-            high = np.percentile(arr, 99.5)
-            arr[arr<low] = low
-            arr[arr>high] = high
-            return np.clip(np.squeeze((arr-low)/(high-low)), 0, 1)
-            
-            
-
-             
-
-            
-            
-
-
-            

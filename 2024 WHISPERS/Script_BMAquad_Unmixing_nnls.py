@@ -91,14 +91,20 @@ else:
             pixel_samples = self.generate_pixel_samples(mineral_type=mineral_type,region=region)
             self.num_pixels = len(pixel_samples)
 
-            self.mineral_data = defaultdict(list)
-            self.non_zero_spectral_names = []
+            self.mineral_data = defaultdict(list)            
             self.pixel_y_data = {}
             self.rmse_list = []
             self.adjusted_r_squared_list = []
             self.computation_time = []
             self.model_size = []
             inclusion_count = 0
+
+            if self.target_mineral.lower() == 'alunite':
+                keywords = ['alunite', 'alun']
+            elif self.target_mineral.lower() == 'kaolinite':
+                keywords = ['kaolin', 'kaolinite', 'kaolin/smect', 'kaosmec']
+            else:
+                keywords = [self.target_mineral.lower()]
 
             for pixel_sample in pixel_samples: 
                 start_time = time.time()
@@ -115,6 +121,7 @@ else:
                 self.coefficients_quad = np.zeros((self.nCols,self.nCols))
                 self.probabilities = np.zeros(self.nCols)
                 self.probabilities_quad = np.zeros((self.nCols,self.nCols))
+                self.non_zero_spectral_names = []
 
                 if 'MaxVars' in kwargs.keys():
                     self.MaxVars = kwargs['MaxVars']
@@ -222,31 +229,22 @@ else:
                         p += 1  
                         self.non_zero_spectral_names.append(name)              
 
-                pixel_rmse = np.sqrt(mean_squared_error(self.y, y_infer))
-
-                rss = np.sum((self.y - y_infer) ** 2)
-                tss = np.sum((self.y - np.mean(self.y)) ** 2)
-                r_squared = 1 - (rss / tss)
-                n = len(self.y)                   
-                adjusted_r_squared = 1 - (1 - r_squared) * (n - 1) / (n - p - 1)                      
+                pixel_rmse = np.sqrt(mean_squared_error(self.y, y_infer))                 
                                         
                 end_time = time.time()
                 elapsed_time = end_time - start_time
 
                 self.mineral_data[y_index].append((y_infer, pixel_rmse))
                 self.rmse_list.append(pixel_rmse)
-                self.adjusted_r_squared_list.append(adjusted_r_squared)
                 self.computation_time.append(elapsed_time)
                 self.model_size.append(p)
                 self.non_zero_spectral_names.append(name) 
 
-                if any(self.target_mineral.lower() in name.lower() for name in self.non_zero_spectral_names):
+                if any(keyword in name.lower() for keyword in keywords for name in self.non_zero_spectral_names):
                     inclusion_count += 1
 
             self.rmse_mean = np.mean(self.rmse_list)
-            self.rmse_std = np.std(self.rmse_list)
-            self.adjusted_r_squared_mean = np.mean(self.adjusted_r_squared_list)
-            self.adjusted_r_squared_std = np.std(self.adjusted_r_squared_list)  
+            self.rmse_std = np.std(self.rmse_list) 
 
             self.computation_time_mean = np.mean(self.computation_time)
             self.model_size_mean = np.mean(self.model_size) 
@@ -292,29 +290,18 @@ else:
             plt.legend()
 
         def plot_metrics_distributions(self, ):
-            # Plot the distribution of RMSE
-            plt.figure(figsize=(13, 5))
+             # Plot the distribution of RMSE: Average and Adjusted R-squared (was not incorporated in results)
+            plt.figure(figsize=(10, 6))
             plt.suptitle(self.technique)
 
             # RMSE Distribution
-            plt.subplot(1, 2, 1)
             plt.hist(self.rmse_list, bins=20, color='skyblue', edgecolor='black')
             plt.title('Distribution of RMSE')
             plt.xlabel('RMSE')
             plt.ylabel('Frequency')
             # Add mean and variance as text annotations
             plt.text(0.95, 0.85, f"Mean: {self.rmse_mean:.4f}\nStandard Deviation: {self.rmse_std:.4f}", 
-                    transform=plt.gca().transAxes, ha='right', va='top', fontsize=10, bbox=dict(facecolor='white', alpha=0.5))
-
-            # Adjusted R-squared Distribution
-            plt.subplot(1, 2, 2)
-            plt.hist(self.adjusted_r_squared_list, bins=20, color='lightcoral', edgecolor='black')
-            plt.title('Distribution of Adjusted R-squared')
-            plt.xlabel('Adjusted R-squared')
-            plt.ylabel('Frequency')
-            # Add mean and variance as text annotations
-            plt.text(0.95, 0.85, f"Mean: {self.adjusted_r_squared_mean:.4f}\nStandard Deviation: {self.adjusted_r_squared_std:.4f}", 
-                    transform=plt.gca().transAxes, ha='right', va='top', fontsize=10, bbox=dict(facecolor='white', alpha=0.5))
+                    transform=plt.gca().transAxes, ha='right', va='top', fontsize=10, bbox=dict(facecolor='white', alpha=0.5))            
 
             plt.tight_layout()
             plt.show()

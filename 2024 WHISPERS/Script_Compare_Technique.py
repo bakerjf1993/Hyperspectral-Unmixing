@@ -16,9 +16,9 @@ import Script_LASSO_Unmixing
 from Script_LASSO_Unmixing import LASSO
 importlib.reload(Script_LASSO_Unmixing)
 
-import Script_Stepwise_Unmixing
-from Script_Stepwise_Unmixing import STEPWISE
-importlib.reload(Script_Stepwise_Unmixing)
+import Script_Search_Optimization_Unmixing
+from Script_Search_Optimization_Unmixing import Search_Optimization
+importlib.reload(Script_Search_Optimization_Unmixing)
 
 import Script_BMA_Unmixing_nnls
 from Script_BMA_Unmixing_nnls import BMA
@@ -86,7 +86,7 @@ else:
                 'NNLS': NNLS,
                 'RIDGE': RIDGE,
                 'LASSO': LASSO,
-                'STEPWISE': STEPWISE,
+                'Search_Optimization': Search_Optimization,
                 'BMA': BMA,
                 'BMAquad': BMAquad
             }
@@ -99,46 +99,51 @@ else:
                     pixel_location,
                     spectral_library_filename
                 )
-                if technique_name == 'STEPWISE':
-                    technique.forward_selectedindex_fit(mineral_type=mineral_type, region=region)
-                    technique_name_stepwise =  technique.technique                   
-                    rmse = technique.rmse_mean 
+                if technique_name == 'Search_Optimization':
+                    technique.depth_first_selectedindex_fit(mineral_type=mineral_type, region=region)
+                    technique_name_Search_Optimization =  technique.technique                   
+                    rmse_mean = technique.rmse_mean 
+                    rmse_std = technique.rmse_std
                     model_size = technique.model_size_mean  
                     runtime = technique.computation_time_mean
                     detection = technique.target_mineral_proportion                     
-                    self.results.append({'technique': technique_name_stepwise, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
+                    self.results.append({'technique': technique_name_Search_Optimization, 'rmse_mean': rmse_mean, 'rmse_std':rmse_std, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
-                    technique.backward_selectedindex_fit(mineral_type=mineral_type, region=region) 
-                    technique_name_stepwise =  technique.technique                   
-                    rmse = technique.rmse_mean 
+                    technique.breadth_first_selectedindex_fit(mineral_type=mineral_type, region=region) 
+                    technique_name_Search_Optimization =  technique.technique                   
+                    rmse_mean = technique.rmse_mean 
+                    rmse_std = technique.rmse_std
                     model_size = technique.model_size_mean  
                     runtime = technique.computation_time_mean      
                     detection = technique.target_mineral_proportion                
-                    self.results.append({'technique': technique_name_stepwise, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
+                    self.results.append({'technique': technique_name_Search_Optimization, 'rmse_mean': rmse_mean, 'rmse_std':rmse_std, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
                 elif technique_name == 'BMA':
                     technique.selectedindex_fit(mineral_type=mineral_type, region=region, MaxVars=2)                        
-                    rmse = technique.rmse_mean  
-                    model_size = technique.model_size_mean  
+                    rmse_mean = technique.rmse_mean  
+                    model_size = technique.model_size_mean 
+                    rmse_std = technique.rmse_std 
                     runtime = technique.computation_time_mean    
                     detection = technique.target_mineral_proportion                      
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
+                    self.results.append({'technique': technique_name, 'rmse_mean': rmse_mean, 'rmse_std':rmse_std, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
                 elif technique_name == 'BMAquad':
                     technique.selectedindex_fit(mineral_type=mineral_type, region=region, MaxVars=2)                        
-                    rmse = technique.rmse_mean  
+                    rmse_mean = technique.rmse_mean  
                     model_size = technique.model_size_mean  
+                    rmse_std = technique.rmse_std
                     runtime = technique.computation_time_mean  
                     detection = technique.target_mineral_proportion                        
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
+                    self.results.append({'technique': technique_name, 'rmse_mean': rmse_mean, 'rmse_std':rmse_std, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
 
                 else:
                     technique.selectedindex_fit(mineral_type=mineral_type, region=region)  
-                    rmse = technique.rmse_mean  
-                    model_size = technique.model_size_mean     
+                    rmse_mean = technique.rmse_mean  
+                    model_size = technique.model_size_mean   
+                    rmse_std = technique.rmse_std  
                     runtime = technique.computation_time_mean  
                     detection = technique.target_mineral_proportion                        
-                    self.results.append({'technique': technique_name, 'rmse': rmse, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
+                    self.results.append({'technique': technique_name, 'rmse_mean': rmse_mean, 'rmse_std':rmse_std, 'model_size': model_size, 'runtime':runtime, 'detection':detection})
             print(self.results)
             df = pd.DataFrame(self.results)
             df.to_csv(f"compare_results_{self.ROI}.csv", index=False)
@@ -148,18 +153,18 @@ else:
             return self
         
         def plot_results(self):
-            colors = {'OLS': 'blue', 'NNLS': 'red', 'RIDGE': 'green', 'LASSO': 'purple', 'Forward Stepwise': 'orange', 'Backward Stepwise': 'brown','BMA':'black','BMAquad':'darkgrey'}
+            colors = {'OLS': 'blue', 'NNLS': 'red', 'RIDGE': 'green', 'LASSO': 'purple', 'Depth First Search': 'orange', 'Breadth First Search': 'brown','BMA':'black','BMAquad':'darkgrey'}
             legend_elements = [Line2D([0], [0], marker='o', color='w', label=key,
                                     markerfacecolor=color, markersize=10) for key, color in colors.items()]
             
             for result in self.results:
-                plt.scatter(result['runtime'], result['rmse'], 
+                plt.scatter(result['runtime'], result['rmse_mean'], 
                             s=result['model_size']*10,  # Adjust size factor as needed
                             color=colors[result['technique']])
             
             plt.legend(handles=legend_elements, title='Techniques',loc='center left', bbox_to_anchor=(1, 0.5))
             plt.xlabel('Average Runtime (seconds)')
-            plt.ylabel('Average RMSE')
+            plt.ylabel('Average rmse_mean')
             plt.title(f'{self.ROI} Model Comparison')
             plt.gcf().patch.set_alpha(0)
             plt.show()
